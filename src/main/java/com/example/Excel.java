@@ -3,7 +3,9 @@ package com.example;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.TreeMap;
 
 import org.apache.poi.hssf.usermodel.HSSFPalette;
@@ -13,6 +15,7 @@ import org.apache.poi.hssf.util.HSSFColor;
 import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.DataFormat;
 import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
@@ -23,11 +26,20 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellRangeAddress;
 
 public class Excel {
-    public static CellStyle _defaultStyle;
-    public static ArrayList<CellContent> countList = new ArrayList<>();
-    public static HashMap<Integer, String> colColor = new HashMap<>();
-    public static HashMap<Integer, String> rowColor = new HashMap<>();
-    public static CellContent emptyCell = new CellContent();
+    private static Workbook workbook;
+    private static String fileName;
+
+    private static CellStyle _defaultStyle;
+
+    private static ArrayList<CellContent> countList = new ArrayList<>();
+    private static HashMap<Integer, String> colColor = new HashMap<>();
+    private static HashMap<Integer, String> rowColor = new HashMap<>();
+
+    private static CellContent emptyCell = new CellContent();
+
+    public Excel(String fName) {
+        fileName = fName;
+    }
 
     private static Cell getCell(Row row, int colIndex) {
         Cell cell;
@@ -39,10 +51,10 @@ public class Excel {
         return cell;
     }
 
-    private static void setCell(Workbook workbook, Row row, int colIndex, CellContent c, String color) {
+    private static void setCell(Row row, int colIndex, CellContent c, String color, CellStyle cs) {
         if (colIndex >= 1 && row.getCell(colIndex) != null) {
             Cell cell = getCell(row, colIndex);
-            String prevValue = cell.getStringCellValue();
+            String prevValue = Double.toString(cell.getNumericCellValue());
 
             CellContent prevCell = new CellContent();
             prevCell.value = prevValue;
@@ -51,12 +63,15 @@ public class Excel {
             prevCell.font_size = c.font_size;
             prevCell.color = c.color;
 
-            setCell(workbook, row, colIndex - 1, prevCell, color);
-            cell.setCellValue(c.value);
+            setCell(row, colIndex - 1, prevCell, color, cs);
+            try {
+                cell.setCellValue(Double.parseDouble(c.value.replace(",", "")));
+            } catch (Exception e) {
+                cell.setCellValue(c.value);
+            }
         } else {
             Cell cell = getCell(row, colIndex);
             cell.setCellValue(c.value);
-            CellStyle cs = workbook.createCellStyle();
 
             cs.setBorderBottom(BorderStyle.THIN);
             cs.setBorderTop(BorderStyle.THIN);
@@ -102,8 +117,19 @@ public class Excel {
             }
 
             if (c.font_family != null) {
-                Font font = fontStyle(workbook, c.font_family, c.font_size, c.color);
+                Font font = fontStyle(c.font_family, c.font_size, c.color);
                 cs.setFont(font);
+            }
+
+            try {
+                if (c.value != null) {
+                    cell.setCellValue(Double.parseDouble(c.value.replace(",", "")));
+                    DataFormat df = workbook.createDataFormat();
+                    cs.setDataFormat(df.getFormat("#,##0"));
+                }
+
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
             }
 
             cell.setCellStyle(cs);
@@ -120,9 +146,8 @@ public class Excel {
         return row;
     }
 
-    private static boolean WriteRow(Workbook workbook, ArrayList<CellContent> contents, int startColumn,
-            int rowIndex,
-            HashMap<Double, Integer> leftColMap, CellStyle style) {
+    private static boolean WriteRow(ArrayList<CellContent> contents, int startColumn,
+            int rowIndex, HashMap<Double, Integer> leftColMap, CellStyle cs) {
         Sheet sheet = workbook.getSheetAt(0);
         Row row = getRow(sheet, rowIndex);
         boolean flag = false;
@@ -169,11 +194,16 @@ public class Excel {
                         default:
                             break;
                     }
+                    CellStyle newcs = workbook.createCellStyle();
+                    if (!color.isEmpty()) {
+                        newcs.setFillForegroundColor(hex2Index(color));
+                        newcs.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                    }
 
-                    WriteMergeCell(workbook, rowIndex, rowIndex + rowPlus, col - prevTotalCount, col, cellcontent,
-                            color);
+                    WriteMergeCell(rowIndex, rowIndex + rowPlus, col - prevTotalCount, col, cellcontent,
+                            newcs);
                 } else {
-                    setCell(workbook, row, col, cellcontent, "");
+                    setCell(row, col, cellcontent, "", workbook.createCellStyle());
                 }
                 flag = true;
             } else {
@@ -181,7 +211,7 @@ public class Excel {
                     countList.add(cellcontent);
                 } else {
                     int col = leftColMap.get(maxLeft);
-                    setCell(workbook, row, startColumn + col, cellcontent, "");
+                    setCell(row, startColumn + col, cellcontent, "", cs);
                     flag = true;
                 }
             }
@@ -189,25 +219,19 @@ public class Excel {
         return flag;
     }
 
-    private static void WriteMergeCell(Workbook workbook, int firstRow, int lastRow, int firstCol, int lastCol,
-            CellContent cc, String backgroundColor) {
+    private static void WriteMergeCell(int firstRow, int lastRow, int firstCol, int lastCol,
+            CellContent cc, CellStyle cs) {
 
         Sheet sheet = workbook.getSheetAt(0);
 
         Row row = getRow(sheet, firstRow);
         Cell cell = getCell(row, firstCol);
-        CellStyle cs = workbook.createCellStyle();
         cs.setAlignment(HorizontalAlignment.CENTER);
         cs.setVerticalAlignment(VerticalAlignment.CENTER);
         cs.setBorderBottom(BorderStyle.THIN);
         cs.setBorderTop(BorderStyle.THIN);
         cs.setBorderRight(BorderStyle.THIN);
         cs.setBorderLeft(BorderStyle.THIN);
-
-        if (!backgroundColor.isEmpty()) {
-            cs.setFillForegroundColor(hex2Index(backgroundColor));
-            cs.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        }
 
         if (cc.isRotate)
             cs.setRotation((short) 90);
@@ -217,7 +241,7 @@ public class Excel {
         }
 
         if (cc.font_family != null) {
-            Font font = fontStyle(workbook, cc.font_family, cc.font_size, cc.color);
+            Font font = fontStyle(cc.font_family, cc.font_size, cc.color);
             cs.setFont(font);
         }
 
@@ -265,7 +289,7 @@ public class Excel {
         return leftColMap;
     }
 
-    private static CellStyle defaultCellStyle(Workbook workbook) {
+    private static CellStyle defaultCellStyle() {
         CellStyle style = workbook.createCellStyle();
 
         style.setAlignment(HorizontalAlignment.CENTER);
@@ -293,7 +317,7 @@ public class Excel {
         return palIndex;
     }
 
-    private static Font fontStyle(Workbook workbook, String font_family, double size, String color) {
+    private static Font fontStyle(String font_family, double size, String color) {
         Font font = workbook.createFont();
 
         font.setFontName(font_family);
@@ -306,24 +330,82 @@ public class Excel {
         return font;
     }
 
-    public static void Write(String fileName, TreeMap<Integer, ArrayList<CellContent>> treeMap,
-            ArrayList<CellContent> rotateList, ArrayList<CellContent> facList) {
+    private static TreeMap<Integer, ArrayList<CellContent>> getTreeMap(ArrayList<CellContent> cellContents) {
+        TreeMap<Integer, ArrayList<CellContent>> MapContent = new TreeMap<Integer, ArrayList<CellContent>>();
 
-        int l = treeMap.size();
-        int i = l;
+        for (CellContent cellContent : cellContents) {
+            Integer key = (int) Math.floor(cellContent.top / 3);
+
+            if (cellContent.isRotate | cellContent.value.matches("Page[0-9]+of[0-9]+")
+                    | cellContent.value.contains("FACTORY")) {
+                continue;
+            }
+
+            if (MapContent.get(key) == null) {
+                ArrayList<CellContent> cellList = new ArrayList<CellContent>();
+                cellList.add(cellContent);
+                MapContent.put(key, cellList);
+            } else {
+                MapContent.get(key).add(cellContent);
+            }
+        }
+
+        for (Map.Entry<Integer, ArrayList<CellContent>> entry : MapContent.entrySet()) {
+            Collections.sort(entry.getValue(), new CellComparator());
+        }
+
+        int i = MapContent.size();
 
         TreeMap<Integer, ArrayList<CellContent>> rows = new TreeMap<Integer, ArrayList<CellContent>>();
 
-        for (ArrayList<CellContent> row : treeMap.descendingMap().values()) {
+        for (ArrayList<CellContent> row : MapContent.descendingMap().values()) {
             rows.put(i, row);
             i--;
         }
 
+        // try {
+        // FileWriter fWriter = new FileWriter("map.txt");
+
+        // for (Map.Entry<Integer, ArrayList<CellContent>> entry :
+        // MapContent.entrySet()) {
+        // fWriter.write(entry.getKey() + " : " + entry.getValue() + "\n");
+        // System.out.println(entry.getKey() + " : " + entry.getValue().size());
+        // }
+
+        // fWriter.close();
+        // } catch (IOException e) {
+
+        // System.out.print(e.getMessage());
+        // }
+
+        return rows;
+    }
+
+    public void LoadCellContents(ArrayList<CellContent> cellContents) {
+
+        ArrayList<CellContent> rotateList = new ArrayList<CellContent>();
+
+        for (CellContent cellContent : cellContents) {
+            if (cellContent.isRotate) {
+                rotateList.add(cellContent);
+            }
+        }
+
+        ArrayList<CellContent> facList = new ArrayList<CellContent>();
+
+        for (CellContent cellContent : cellContents) {
+            if (cellContent.value.startsWith("FACTORY")) {
+                facList.add(cellContent);
+            }
+        }
+
+        TreeMap<Integer, ArrayList<CellContent>> rows = getTreeMap(cellContents);
+
         try {
-            Workbook workbook = new XSSFWorkbook();
+            workbook = new XSSFWorkbook();
             Sheet sheet = workbook.createSheet();
 
-            _defaultStyle = defaultCellStyle(workbook);
+            _defaultStyle = defaultCellStyle();
 
             HashMap<Double, Integer> leftColMap = GetLeftColMap(sheet, rows);
 
@@ -332,7 +414,7 @@ public class Excel {
             colColor.put(6, "#bcd6ed");
 
             // row 1
-            WriteRow(workbook, rows.get(1), 3, 0, leftColMap, _defaultStyle);
+            WriteRow(rows.get(1), 3, 0, leftColMap, _defaultStyle);
 
             // row 2
             int row1Size = rows.get(1).size();
@@ -342,32 +424,40 @@ public class Excel {
 
             for (CellContent cellContent : rows.get(2)) {
                 colColor.put(firstCol + colNumContent - 1, "#ffff99");
-                WriteMergeCell(workbook, 1, 1, firstCol, firstCol + colNumContent - 1, cellContent, "");
+                WriteMergeCell(1, 1, firstCol, firstCol + colNumContent - 1, cellContent,
+                        workbook.createCellStyle());
                 firstCol += colNumContent;
             }
 
             // row 3
             for (CellContent cellContent : rows.get(3)) {
-                WriteMergeCell(workbook, 1, 2, firstCol, firstCol, cellContent, "");
+                WriteMergeCell(1, 2, firstCol, firstCol, cellContent, workbook.createCellStyle());
                 firstCol++;
             }
 
             int indexRow = 2;
             for (int j = 4; j < rows.size(); j++) {
-                if (WriteRow(workbook, rows.get(j), 3, indexRow, leftColMap, _defaultStyle)) {
+                if (WriteRow(rows.get(j), 3, indexRow, leftColMap, _defaultStyle)) {
                     indexRow++;
                 }
             }
-            WriteRow(workbook, rows.get(treeMap.size()), 3, indexRow, leftColMap, _defaultStyle);
+            WriteRow(rows.get(rows.size()), 3, indexRow, leftColMap, _defaultStyle);
 
-            WriteMergeCell(workbook, 1, 1, 0, 3, new CellContent(), "#ffcc99");
-            WriteMergeCell(workbook, 2, 8, 0, 2, facList.get(0), "#ffcc99");
+            CellStyle newcs = workbook.createCellStyle();
+            newcs.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            newcs.setFillForegroundColor(hex2Index("#ffcc99"));
+
+            WriteMergeCell(1, 1, 0, 3, new CellContent(), newcs);
+            WriteMergeCell(2, 8, 0, 2, facList.get(0), newcs);
 
             ArrayList<CellContent> rotateArray = new ArrayList<CellContent>();
             for (CellContent cellContent : rotateList) {
-                if (cellContent.value.startsWith("LINE"))
-                    WriteMergeCell(workbook, 9, indexRow - 2, 0, 0, cellContent, "#e2efda");
-                else {
+                if (cellContent.value.startsWith("LINE")) {
+                    newcs = workbook.createCellStyle();
+                    newcs.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                    newcs.setFillForegroundColor(hex2Index("#e2efda"));
+                    WriteMergeCell(9, indexRow - 2, 0, 0, cellContent, newcs);
+                } else {
                     rotateArray.add(cellContent);
                 }
             }
@@ -379,7 +469,10 @@ public class Excel {
                 if (sheet.getRow(rowI).getCell(1) != null
                         && sheet.getRow(rowI).getCell(2).getStringCellValue().isEmpty()) {
                     if (rowCount > 0) {
-                        WriteMergeCell(workbook, rowI - rowCount, rowI - 1, 1, 1, rotateArray.get(index), "#32CD32");
+                        newcs = workbook.createCellStyle();
+                        newcs.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                        newcs.setFillForegroundColor(hex2Index("#32CD32"));
+                        WriteMergeCell(rowI - rowCount, rowI - 1, 1, 1, rotateArray.get(index), newcs);
                         index++;
                     }
                     rowCount = 0;
@@ -397,7 +490,10 @@ public class Excel {
                 boolean rightIsEmpty = sheet.getRow(rowI).getCell(3).getStringCellValue().isEmpty();
                 if (!currentIsNull && rightIsEmpty) {
                     if (rowCount > 0) {
-                        WriteMergeCell(workbook, rowI - rowCount, rowI - 1, 2, 2, countList.get(indexCount), "#ccffff");
+                        newcs = workbook.createCellStyle();
+                        newcs.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                        newcs.setFillForegroundColor(hex2Index("#ccffff"));
+                        WriteMergeCell(rowI - rowCount, rowI - 1, 2, 2, countList.get(indexCount), newcs);
                         indexCount++;
                     }
                     rowCount = 0;
@@ -423,7 +519,7 @@ public class Excel {
                 for (int c = 4; c < colNum; c++) {
                     Cell cell = row.getCell(c);
                     if (cell == null) {
-                        setCell(workbook, row, c, emptyCell, "");
+                        setCell(row, c, emptyCell, "", workbook.createCellStyle());
                     }
                 }
             }
